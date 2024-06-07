@@ -13,24 +13,32 @@ struct UserController: RouteCollection {
         let usersRoute = routes.grouped("users")
         usersRoute.post("signup", use: createHandler)
         usersRoute.post("login", use: loginHandler)
+        usersRoute.put(":userID", "link", use: linkToTherapistHandler)
+        usersRoute.get(":userID", use: getUserHandler)
+        usersRoute.get("therapist", ":referenceCode", use: getTherapistHandler)
 //        usersRoute.get("me", use: getUserHandler)
     }
     
+    @Sendable
     func createHandler(_ req: Request) throws -> EventLoopFuture<User> {
-        do {
-            let user = try req.content.decode(User.self)
-            user.passwordHash = try Bcrypt.hash(user.passwordHash)
-            if user.role == .therapist {
-                user.referenceCode = generateReferenceCode(for: user.name)
+        let userRequest = try req.content.decode(CreateUserRequest.self)
+        let user = User(name: userRequest.name, email: userRequest.email, passwordHash: try Bcrypt.hash(userRequest.passwordHash), role: userRequest.role)
+
+        if user.role == .therapist {
+            user.referenceCode = generateReferenceCode(for: user.name)
+        }
+
+        return user.save(on: req.db).flatMap {
+            if user.role == .patient {
+                let patient = Patient(userID: user.id!, referenceCode: userRequest.referenceCode ?? "")
+                return patient.save(on: req.db).map { user }
+            } else {
+                return req.eventLoop.makeSucceededFuture(user)
             }
-            
-            return user.save(on: req.db).map { user }
-        } catch {
-            req.logger.error("Failed to create user: \(error.localizedDescription)")
-            throw Abort(.badRequest, reason: "Invalid request data.")
         }
     }
     
+    @Sendable
     func loginHandler(_ req: Request) throws -> EventLoopFuture<User> {
         let loginRequest = try req.content.decode(LoginRequest.self)
         
@@ -40,7 +48,7 @@ struct UserController: RouteCollection {
             .unwrap(or: Abort(.notFound))
             .flatMap { user in
                 do {
-                    if try Bcrypt.verify(loginRequest.password, created: user.passwordHash) {
+                    if try Bcrypt.verify(loginRequest.passwordHash, created: user.passwordHash) {
                         // Generate a token or session here if needed
                         return req.eventLoop.makeSucceededFuture(user)
                     } else {
@@ -52,12 +60,42 @@ struct UserController: RouteCollection {
             }
     }
     
+    @Sendable
     func getUserHandler(_ req: Request) throws -> EventLoopFuture<User> {
-        let user = try req.auth.require(User.self)
+        let userID = try req.parameters.require("userID", as: UUID.self)
         return req.db.query(User.self)
-            .filter(\.$id == user.id!)
+            .filter(\.$id == userID)
             .first()
             .unwrap(or: Abort(.notFound))
+    }
+    
+    @Sendable
+    func linkToTherapistHandler(_ req: Request) async throws -> User {
+        let userID = try req.parameters.require("userID", as: UUID.self)
+        let linkRequest = try req.content.decode(LinkRequest.self)
+        
+        // Find the User with the given patientID and add reference code from link request to User
+        guard let user = try await User.find(userID, on: req.db), user.role == .patient else {
+            throw Abort(.notFound, reason: "Patient not found.")
+        }
+        user.referenceCode = linkRequest.referenceCode
+        
+        try await user.save(on: req.db)
+        return user
+    }
+    
+    @Sendable
+    func getTherapistHandler(_ req: Request) async throws -> User {
+        let referenceCode = try req.parameters.require("referenceCode", as: String.self)
+        
+        guard let therapist = try await User.query(on: req.db)
+            .filter(\.$role == .therapist)
+            .filter(\.$referenceCode == referenceCode)
+            .first() else {
+            throw Abort(.notFound, reason: "Therapist not found.")
+        }
+        
+        return therapist
     }
     
     private func generateReferenceCode(for username: String) -> String {

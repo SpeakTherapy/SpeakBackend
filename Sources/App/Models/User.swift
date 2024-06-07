@@ -11,28 +11,28 @@ import Vapor
 
 final class User: Model, Content, Authenticatable {
     static let schema = "users"
-    
+
     @ID(key: .id)
     var id: UUID?
-    
+
     @Field(key: "name")
     var name: String
-    
+
     @Field(key: "email")
     var email: String
-    
+
     @Field(key: "passwordHash")
     var passwordHash: String
-    
+
     @Field(key: "role")
     var role: UserRole
-    
+
     @OptionalField(key: "referenceCode")
     var referenceCode: String?
-    
+
     @Children(for: \.$therapist)
     var patients: [Patient]
-    
+
     init() { }
 
     init(id: UUID? = nil, name: String, email: String, passwordHash: String, role: UserRole, referenceCode: String? = nil) {
@@ -46,7 +46,6 @@ final class User: Model, Content, Authenticatable {
 }
 
 extension User {
-    // Public user data
     struct Public: Content {
         var id: UUID?
         var name: String
@@ -54,11 +53,8 @@ extension User {
         var role: UserRole
         var referenceCode: String?
     }
-    
+
     func convertToPublic() -> Public {
         return Public(id: id, name: name, email: email, role: role, referenceCode: referenceCode)
     }
 }
-
-
-

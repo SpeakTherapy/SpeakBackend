@@ -16,11 +16,13 @@ struct ExerciseController: RouteCollection {
         exercisesRoute.get(use: getAllHandler)
     }
     
+    @Sendable
     func createHandler(_ req: Request) throws -> EventLoopFuture<Exercise> {
         let exercise = try req.content.decode(Exercise.self)
         return exercise.save(on: req.db).map { exercise }
     }
     
+    @Sendable
     func getAllHandler(_ req: Request) throws -> EventLoopFuture<[Exercise]> {
         Exercise.query(on: req.db).all()
     }
